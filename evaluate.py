@@ -13,7 +13,6 @@ import torch
 import numpy as np
 from tqdm import tqdm
 from typing import Dict, List
-import pandas as pd
 
 from models import DiffusionFieldModel, UNet, NoiseScheduler
 from models.coord_encoder import create_coordinate_grid

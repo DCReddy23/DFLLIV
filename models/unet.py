@@ -105,88 +105,15 @@ class ResidualBlock(nn.Module):
         return h + self.residual_conv(x)
 
 
-class AttentionBlock(nn.Module):
-    """Self-attention block for UNet.
-    
-    Args:
-        channels: Number of channels
-        num_heads: Number of attention heads (default: 4)
-    """
-    
-    def __init__(self, channels: int, num_heads: int = 4):
-        super().__init__()
-        self.channels = channels
-        self.num_heads = num_heads
-        
-        self.norm = nn.GroupNorm(32, channels)
-        self.qkv = nn.Conv2d(channels, channels * 3, kernel_size=1)
-        self.proj = nn.Conv2d(channels, channels, kernel_size=1)
-    
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass.
-        
-        Args:
-            x: Input tensor of shape (B, C, H, W)
-        
-        Returns:
-            Output tensor of shape (B, C, H, W)
-        """
-        B, C, H, W = x.shape
-        
-        h = self.norm(x)
-        qkv = self.qkv(h)
-        
-        # Reshape for multi-head attention
-        qkv = qkv.reshape(B, 3, self.num_heads, C // self.num_heads, H * W)
-        qkv = qkv.permute(1, 0, 2, 4, 3)  # (3, B, num_heads, H*W, head_dim)
-        q, k, v = qkv[0], qkv[1], qkv[2]
-        
-        # Attention
-        attn = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(C // self.num_heads)
-        attn = torch.softmax(attn, dim=-1)
-        
-        # Apply attention to values
-        h = torch.matmul(attn, v)
-        h = h.permute(0, 1, 3, 2).reshape(B, C, H, W)
-        
-        h = self.proj(h)
-        
-        return x + h
-
-
-class Downsample(nn.Module):
-    """Downsampling block."""
-    
-    def __init__(self, channels: int):
-        super().__init__()
-        self.conv = nn.Conv2d(channels, channels, kernel_size=3, stride=2, padding=1)
-    
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.conv(x)
-
-
-class Upsample(nn.Module):
-    """Upsampling block."""
-    
-    def __init__(self, channels: int):
-        super().__init__()
-        self.conv = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
-    
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = nn.functional.interpolate(x, scale_factor=2, mode='nearest')
-        return self.conv(x)
-
-
 class UNet(nn.Module):
-    """UNet-based conditional diffusion model.
+    """Simplified UNet-based conditional diffusion model.
     
     Args:
         in_channels: Number of input channels (default: 3 for RGB)
         out_channels: Number of output channels (default: 3 for RGB)
         channels: Base number of channels (default: 128)
-        channel_multipliers: Channel multipliers for each resolution (default: [1, 2, 2, 4])
+        channel_multipliers: Channel multipliers for each resolution (default: [1, 2, 4])
         num_res_blocks: Number of residual blocks per resolution (default: 2)
-        attention_resolutions: Resolutions to apply attention at (default: [16])
         dropout: Dropout rate (default: 0.0)
         condition_dim: Dimension of conditioning vector (default: 256)
     """
@@ -196,9 +123,8 @@ class UNet(nn.Module):
         in_channels: int = 3,
         out_channels: int = 3,
         channels: int = 128,
-        channel_multipliers: List[int] = [1, 2, 2, 4],
+        channel_multipliers: List[int] = [1, 2, 4],
         num_res_blocks: int = 2,
-        attention_resolutions: List[int] = [16],
         dropout: float = 0.0,
         condition_dim: int = 256
     ):
@@ -207,15 +133,27 @@ class UNet(nn.Module):
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.channels = channels
-        self.num_resolutions = len(channel_multipliers)
         
         # Time embedding
         time_embed_dim = channels * 4
         self.time_embed = TimeEmbedding(time_embed_dim)
         
-        # Condition encoder (separate from diffusion field condition encoder)
-        from .condition_encoder import LightweightConditionEncoder
-        self.condition_encoder = LightweightConditionEncoder(condition_dim=condition_dim)
+        # Condition encoder (lightweight version to avoid circular import)
+        self.condition_encoder = nn.Sequential(
+            nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3),
+            nn.BatchNorm2d(64),
+            nn.SiLU(),
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(128),
+            nn.SiLU(),
+            nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(256),
+            nn.SiLU(),
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Flatten(),
+            nn.Linear(256, condition_dim),
+            nn.SiLU()
+        )
         
         # Condition projection
         self.condition_proj = nn.Linear(condition_dim, time_embed_dim)
@@ -223,73 +161,50 @@ class UNet(nn.Module):
         # Initial convolution
         self.conv_in = nn.Conv2d(in_channels, channels, kernel_size=3, padding=1)
         
-        # Downsampling
-        self.down_blocks = nn.ModuleList()
+        # Downsample path
+        self.down = nn.ModuleList()
         current_channels = channels
-        input_block_channels = [channels]
         
-        for level, mult in enumerate(channel_multipliers):
-            out_channels_level = channels * mult
+        for i, mult in enumerate(channel_multipliers):
+            out_ch = channels * mult
             
+            # Residual blocks
             for _ in range(num_res_blocks):
-                block = ResidualBlock(
-                    current_channels,
-                    out_channels_level,
-                    time_embed_dim,
-                    dropout
-                )
-                self.down_blocks.append(block)
-                current_channels = out_channels_level
-                input_block_channels.append(current_channels)
-                
-                # Add attention if at specified resolution
-                # Note: We'll add attention based on level for simplicity
-                if level >= 2:  # Add attention at lower resolutions
-                    self.down_blocks.append(AttentionBlock(current_channels))
+                self.down.append(ResidualBlock(current_channels, out_ch, time_embed_dim, dropout))
+                current_channels = out_ch
             
-            # Downsample (except at last level)
-            if level < self.num_resolutions - 1:
-                self.down_blocks.append(Downsample(current_channels))
-                input_block_channels.append(current_channels)
+            # Downsample (except at the last level)
+            if i < len(channel_multipliers) - 1:
+                self.down.append(nn.Conv2d(current_channels, current_channels, kernel_size=3, stride=2, padding=1))
         
         # Middle
-        self.middle_blocks = nn.ModuleList([
+        self.mid = nn.ModuleList([
             ResidualBlock(current_channels, current_channels, time_embed_dim, dropout),
-            AttentionBlock(current_channels),
-            ResidualBlock(current_channels, current_channels, time_embed_dim, dropout)
+            ResidualBlock(current_channels, current_channels, time_embed_dim, dropout),
         ])
         
-        # Upsampling
-        self.up_blocks = nn.ModuleList()
+        # Upsample path
+        self.up = nn.ModuleList()
         
-        for level, mult in reversed(list(enumerate(channel_multipliers))):
-            out_channels_level = channels * mult
+        for i, mult in reversed(list(enumerate(channel_multipliers))):
+            out_ch = channels * mult
             
-            for i in range(num_res_blocks + 1):
-                # Skip connection from downsampling
-                skip_channels = input_block_channels.pop()
-                block = ResidualBlock(
-                    current_channels + skip_channels,
-                    out_channels_level,
-                    time_embed_dim,
-                    dropout
-                )
-                self.up_blocks.append(block)
-                current_channels = out_channels_level
-                
-                # Add attention if at specified resolution
-                if level >= 2:
-                    self.up_blocks.append(AttentionBlock(current_channels))
-                
-                # Upsample (except at last block of last level)
-                if level > 0 and i == num_res_blocks:
-                    self.up_blocks.append(Upsample(current_channels))
+            # Residual blocks (with skip connections)
+            for j in range(num_res_blocks + 1):
+                # Account for skip connection from down path
+                in_ch = current_channels + (out_ch if j == 0 and i < len(channel_multipliers) - 1 else 0)
+                self.up.append(ResidualBlock(in_ch, out_ch, time_embed_dim, dropout))
+                current_channels = out_ch
+            
+            # Upsample (except at the first level being processed, which is the last)
+            if i > 0:
+                self.up.append(nn.ConvTranspose2d(current_channels, current_channels, kernel_size=4, stride=2, padding=1))
         
         # Output
         self.out = nn.Sequential(
             nn.GroupNorm(32, current_channels),
             nn.SiLU(),
-            nn.Conv2d(current_channels, self.out_channels, kernel_size=3, padding=1)
+            nn.Conv2d(current_channels, out_channels, kernel_size=3, padding=1)
         )
     
     def forward(
@@ -320,35 +235,29 @@ class UNet(nn.Module):
         # Initial convolution
         h = self.conv_in(x)
         
-        # Downsampling with skip connections
-        skip_connections = [h]
-        for module in self.down_blocks:
-            if isinstance(module, (ResidualBlock, AttentionBlock)):
-                if isinstance(module, ResidualBlock):
-                    h = module(h, time_emb)
-                else:
-                    h = module(h)
-                skip_connections.append(h)
-            elif isinstance(module, Downsample):
+        # Downsampling - store skip connections
+        hs = [h]
+        for module in self.down:
+            if isinstance(module, ResidualBlock):
+                h = module(h, time_emb)
+            else:  # Downsample
                 h = module(h)
-                skip_connections.append(h)
+            hs.append(h)
         
         # Middle
-        for module in self.middle_blocks:
-            if isinstance(module, ResidualBlock):
-                h = module(h, time_emb)
-            else:
-                h = module(h)
+        for module in self.mid:
+            h = module(h, time_emb)
         
-        # Upsampling with skip connections
-        for module in self.up_blocks:
+        # Upsampling - use skip connections
+        for module in self.up:
             if isinstance(module, ResidualBlock):
-                skip = skip_connections.pop()
-                h = torch.cat([h, skip], dim=1)
+                # Pop skip connection if available and matches size
+                if len(hs) > 0:
+                    skip = hs.pop()
+                    if skip.shape[2:] == h.shape[2:]:
+                        h = torch.cat([h, skip], dim=1)
                 h = module(h, time_emb)
-            elif isinstance(module, AttentionBlock):
-                h = module(h)
-            elif isinstance(module, Upsample):
+            else:  # Upsample
                 h = module(h)
         
         # Output
@@ -363,7 +272,7 @@ if __name__ == "__main__":
         in_channels=3,
         out_channels=3,
         channels=128,
-        channel_multipliers=[1, 2, 2, 4],
+        channel_multipliers=[1, 2, 4],
         num_res_blocks=2
     )
     
@@ -376,3 +285,4 @@ if __name__ == "__main__":
     print(f"Input shape: {x.shape}")
     print(f"Output shape: {output.shape}")
     print(f"Total parameters: {sum(p.numel() for p in model.parameters()):,}")
+
