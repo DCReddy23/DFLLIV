@@ -1,0 +1,46 @@
+# Google Colab Optimized Configuration
+# Designed for Colab's free GPU (T4 with ~15GB VRAM)
+# Reduces memory usage and training time for demo purposes
+
+model:
+  type: "diffusion_field"  # or "unet"
+  hidden_dim: 256
+  num_layers: 8
+  fourier_frequencies: 128
+  condition_dim: 256
+  time_embed_dim: 256
+
+diffusion:
+  num_timesteps: 1000
+  beta_schedule: "cosine"  # or "linear"
+  beta_start: 0.0001
+  beta_end: 0.02
+  sampling_method: "ddim"  # or "ddpm"
+  ddim_steps: 50
+
+training:
+  batch_size: 4  # Reduced from 8 for Colab GPU memory
+  learning_rate: 1e-4
+  weight_decay: 1e-2
+  num_epochs: 100  # Reduced from 500 for faster demo training
+  warmup_epochs: 5  # Reduced from 10
+  grad_clip: 1.0
+  ema_decay: 0.9999
+  perceptual_loss_weight: 0.1
+  save_every: 25  # Save more frequently for shorter training
+  val_every: 5   # Validate more frequently
+  checkpoint_dir: "/content/drive/MyDrive/DFLLIV/checkpoints"  # Save to Google Drive
+  log_dir: "/content/drive/MyDrive/DFLLIV/runs"  # Save logs to Google Drive
+
+data:
+  dataset: "LOL"  # or "LOL-v2" or "synthetic"
+  train_dir: "data/LOL/our485"
+  val_dir: "data/LOL/eval15"
+  crop_size: 256
+  augment: true
+  num_workers: 2  # Reduced from 4 for Colab
+
+inference:
+  sampling_steps: 50
+  batch_size: 1
+  output_dir: "outputs"

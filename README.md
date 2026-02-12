@@ -3,8 +3,24 @@
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-ee4c2c.svg)](https://pytorch.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/DCReddy23/DFLLIV/blob/main/notebooks/DFLLIV_Colab_Training.ipynb)
 
 A state-of-the-art low-light image enhancement framework using **Diffusion Fields** - combining denoising diffusion probabilistic models (DDPMs) with neural fields (implicit neural representations).
+
+## 🚀 Quick Start with Google Colab
+
+**Want to train without any local setup?** Click the badge above to open our Google Colab notebook!
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/DCReddy23/DFLLIV/blob/main/notebooks/DFLLIV_Colab_Training.ipynb)
+
+The notebook includes:
+- ✅ Complete environment setup
+- ✅ LOL dataset download and preparation
+- ✅ Training with Colab's free GPU (T4)
+- ✅ Inference and evaluation examples
+- ✅ Results visualization
+
+**Training Time on Colab:** ~4-6 hours for 100 epochs (T4 GPU)
 
 ## 🌟 Overview
 
