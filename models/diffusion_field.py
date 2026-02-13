@@ -256,7 +256,7 @@ class DiffusionFieldModel(nn.Module):
         grid = grid.unsqueeze(1)  # (B, 1, N, 2)
         
         noisy_pixels = torch.nn.functional.grid_sample(
-            noisy_image, grid, mode='bilinear', align_corners=True
+            noisy_image, grid, mode='bilinear', align_corners=False
         )  # (B, 3, 1, N)
         noisy_pixels = noisy_pixels.squeeze(2).permute(0, 2, 1)  # (B, N, 3)
         

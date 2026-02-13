@@ -163,19 +163,21 @@ class UNet(nn.Module):
         
         # Downsample path - track channels for skip connections
         self.down = nn.ModuleList()
-        self.skip_channels = []  # Track channels for skip connections
+        # skip_channels is used only during __init__ to track channel dims for architecture construction
+        # Actual runtime skip connections are stored in 'hs' during forward()
+        skip_channels_tracker = []  # Track channels for skip connections
         current_channels = channels
-        self.skip_channels.append(current_channels)  # After conv_in
+        skip_channels_tracker.append(current_channels)  # After conv_in
         
         for i, mult in enumerate(channel_multipliers):
             out_ch = channels * mult
             for _ in range(num_res_blocks):
                 self.down.append(ResidualBlock(current_channels, out_ch, time_embed_dim, dropout))
                 current_channels = out_ch
-                self.skip_channels.append(current_channels)
+                skip_channels_tracker.append(current_channels)
             if i < len(channel_multipliers) - 1:
                 self.down.append(nn.Conv2d(current_channels, current_channels, kernel_size=3, stride=2, padding=1))
-                self.skip_channels.append(current_channels)
+                skip_channels_tracker.append(current_channels)
         
         # Middle
         self.mid = nn.ModuleList([
@@ -183,12 +185,12 @@ class UNet(nn.Module):
             ResidualBlock(current_channels, current_channels, time_embed_dim, dropout),
         ])
         
-        # Upsample path - consume skip connections in reverse
+        # Upsample path - use tracked skip channels to build correct architecture
         self.up = nn.ModuleList()
         for i, mult in reversed(list(enumerate(channel_multipliers))):
             out_ch = channels * mult
             for j in range(num_res_blocks + 1):
-                skip_ch = self.skip_channels.pop()
+                skip_ch = skip_channels_tracker.pop()
                 self.up.append(ResidualBlock(current_channels + skip_ch, out_ch, time_embed_dim, dropout))
                 current_channels = out_ch
             if i > 0:
