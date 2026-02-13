@@ -174,7 +174,7 @@ class UNet(nn.Module):
                 current_channels = out_ch
                 self.skip_channels.append(current_channels)
             if i < len(channel_multipliers) - 1:
-                self.down.append(nn.Conv2d(current_channels, current_channels, 3, stride=2, padding=1))
+                self.down.append(nn.Conv2d(current_channels, current_channels, kernel_size=3, stride=2, padding=1))
                 self.skip_channels.append(current_channels)
         
         # Middle
@@ -192,7 +192,7 @@ class UNet(nn.Module):
                 self.up.append(ResidualBlock(current_channels + skip_ch, out_ch, time_embed_dim, dropout))
                 current_channels = out_ch
             if i > 0:
-                self.up.append(nn.ConvTranspose2d(current_channels, current_channels, 4, stride=2, padding=1))
+                self.up.append(nn.ConvTranspose2d(current_channels, current_channels, kernel_size=4, stride=2, padding=1))
         
         # Output
         self.out = nn.Sequential(
