@@ -231,7 +231,7 @@ class Trainer:
                 normal_light.shape[3],
                 device=self.device
             )
-            noise_pred = self.model(low_light, coords, timesteps)
+            noise_pred = self.model(low_light, coords, timesteps, noisy_images)
             # Reshape back to image space
             noise_pred = noise_pred.reshape(batch_size, normal_light.shape[2], normal_light.shape[3], 3)
             noise_pred = noise_pred.permute(0, 3, 1, 2)
@@ -250,11 +250,12 @@ class Trainer:
             sigma_t = sigma_t.view(-1, 1, 1, 1)
             
             pred_x0 = (noisy_images - sigma_t * noise_pred) / alpha_t
-            pred_x0 = torch.clamp(pred_x0, -1, 1)
+            pred_x0 = torch.clamp(pred_x0, 0, 1)  # Clamp to [0,1] first (the natural range)
             
-            # LPIPS expects [-1, 1] range
+            # Convert both to [-1, 1] for LPIPS
+            pred_x0_norm = pred_x0 * 2 - 1
             normal_light_norm = normal_light * 2 - 1
-            perceptual_loss = self.lpips_loss(pred_x0, normal_light_norm).mean()
+            perceptual_loss = self.lpips_loss(pred_x0_norm, normal_light_norm).mean()
             
             total_loss = mse_loss + self.perceptual_weight * perceptual_loss
         else:
@@ -335,7 +336,7 @@ class Trainer:
             else:
                 from models.coord_encoder import create_coordinate_grid
                 coords = create_coordinate_grid(image_size[0], image_size[1], device=self.device)
-                noise_pred = self.model(low_light, coords, t_batch)
+                noise_pred = self.model(low_light, coords, t_batch, x)
                 noise_pred = noise_pred.reshape(batch_size, image_size[0], image_size[1], 3)
                 noise_pred = noise_pred.permute(0, 3, 1, 2)
             

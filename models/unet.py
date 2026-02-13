@@ -161,21 +161,23 @@ class UNet(nn.Module):
         # Initial convolution
         self.conv_in = nn.Conv2d(in_channels, channels, kernel_size=3, padding=1)
         
-        # Downsample path
+        # Downsample path - track channels for skip connections
         self.down = nn.ModuleList()
+        # skip_channels is used only during __init__ to track channel dims for architecture construction
+        # Actual runtime skip connections are stored in 'hs' during forward()
+        skip_channels_tracker = []  # Track channels for skip connections
         current_channels = channels
+        skip_channels_tracker.append(current_channels)  # After conv_in
         
         for i, mult in enumerate(channel_multipliers):
             out_ch = channels * mult
-            
-            # Residual blocks
             for _ in range(num_res_blocks):
                 self.down.append(ResidualBlock(current_channels, out_ch, time_embed_dim, dropout))
                 current_channels = out_ch
-            
-            # Downsample (except at the last level)
+                skip_channels_tracker.append(current_channels)
             if i < len(channel_multipliers) - 1:
                 self.down.append(nn.Conv2d(current_channels, current_channels, kernel_size=3, stride=2, padding=1))
+                skip_channels_tracker.append(current_channels)
         
         # Middle
         self.mid = nn.ModuleList([
@@ -183,20 +185,14 @@ class UNet(nn.Module):
             ResidualBlock(current_channels, current_channels, time_embed_dim, dropout),
         ])
         
-        # Upsample path
+        # Upsample path - use tracked skip channels to build correct architecture
         self.up = nn.ModuleList()
-        
         for i, mult in reversed(list(enumerate(channel_multipliers))):
             out_ch = channels * mult
-            
-            # Residual blocks (with skip connections)
             for j in range(num_res_blocks + 1):
-                # Account for skip connection from down path
-                in_ch = current_channels + (out_ch if j == 0 and i < len(channel_multipliers) - 1 else 0)
-                self.up.append(ResidualBlock(in_ch, out_ch, time_embed_dim, dropout))
+                skip_ch = skip_channels_tracker.pop()
+                self.up.append(ResidualBlock(current_channels + skip_ch, out_ch, time_embed_dim, dropout))
                 current_channels = out_ch
-            
-            # Upsample (except at the first level being processed, which is the last)
             if i > 0:
                 self.up.append(nn.ConvTranspose2d(current_channels, current_channels, kernel_size=4, stride=2, padding=1))
         
@@ -251,11 +247,7 @@ class UNet(nn.Module):
         # Upsampling - use skip connections
         for module in self.up:
             if isinstance(module, ResidualBlock):
-                # Pop skip connection if available and matches size
-                if len(hs) > 0:
-                    skip = hs.pop()
-                    if skip.shape[2:] == h.shape[2:]:
-                        h = torch.cat([h, skip], dim=1)
+                h = torch.cat([h, hs.pop()], dim=1)
                 h = module(h, time_emb)
             else:  # Upsample
                 h = module(h)
