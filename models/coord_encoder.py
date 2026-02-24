@@ -77,9 +77,11 @@ class CoordEncoder(nn.Module):
         sin_features = torch.sin(scaled_coords)
         cos_features = torch.cos(scaled_coords)
         
-        # Flatten frequency and coordinate dimensions: (B, N, F*2*2)
-        encoded = torch.cat([sin_features, cos_features], dim=2)
-        encoded = encoded.reshape(batch_size, num_points, -1)
+        # Flatten frequency and coordinate dims separately, then concatenate
+        # sin_features: (B, N, F, 2) -> (B, N, F*2)
+        sin_flat = sin_features.reshape(batch_size, num_points, -1)
+        cos_flat = cos_features.reshape(batch_size, num_points, -1)
+        encoded = torch.cat([sin_flat, cos_flat], dim=-1)  # (B, N, F*4)
         
         # Optionally concatenate raw input
         if self.include_input:

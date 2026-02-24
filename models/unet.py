@@ -238,14 +238,14 @@ class UNet(nn.Module):
         # Initial convolution
         h = self.conv_in(x)
         
-        # Downsampling - store skip connections
-        hs = [h]
+        # Downsampling - store skip connections only from ResidualBlock outputs
+        hs = []
         for module in self.down:
             if isinstance(module, ResidualBlock):
                 h = module(h, time_emb)
-            else:  # Downsample
+                hs.append(h)  # only save ResidualBlock outputs as skips
+            else:  # Downsample conv
                 h = module(h)
-            hs.append(h)
         
         # Middle
         for module in self.mid:
@@ -257,6 +257,11 @@ class UNet(nn.Module):
             if isinstance(module, ResidualBlock):
                 if self.up_has_skip[skip_idx] and len(hs) > 0:
                     skip = hs.pop()
+                    # Ensure spatial dimensions match before concatenating
+                    if skip.shape[2:] != h.shape[2:]:
+                        skip = torch.nn.functional.interpolate(
+                            skip, size=h.shape[2:], mode='bilinear', align_corners=False
+                        )
                     h = torch.cat([h, skip], dim=1)
                 h = module(h, time_emb)
                 skip_idx += 1
@@ -288,4 +293,3 @@ if __name__ == "__main__":
     print(f"Input shape: {x.shape}")
     print(f"Output shape: {output.shape}")
     print(f"Total parameters: {sum(p.numel() for p in model.parameters()):,}")
-

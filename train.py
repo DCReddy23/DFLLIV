@@ -107,8 +107,9 @@ class Trainer:
         # Learning rate scheduler
         self.scheduler = self._create_scheduler()
         
-        # Mixed precision scaler
-        self.scaler = GradScaler('cuda')
+        # Mixed precision scaler (only on CUDA)
+        self.use_amp = self.device.type == 'cuda'
+        self.scaler = GradScaler(enabled=self.use_amp)
         
         # Perceptual loss (LPIPS)
         self.lpips_loss = lpips.LPIPS(net='alex').to(self.device)
@@ -175,7 +176,7 @@ class Trainer:
             normal_light = normal_light.to(self.device)
             
             # Mixed precision training
-            with autocast('cuda'):
+            with autocast('cuda', enabled=self.use_amp):
                 loss = self._compute_loss(low_light, normal_light)
             
             # Backward pass
@@ -420,7 +421,7 @@ class Trainer:
             batch_size=self.config['inference']['batch_size'],
             split='val',
             num_workers=self.config['data']['num_workers'],
-            crop_size=self.config['data']['crop_size'],
+            crop_size=None,  # FIX: use full-resolution images for accurate evaluation
             augment=False
         )
         

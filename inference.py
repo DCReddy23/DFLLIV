@@ -146,14 +146,10 @@ class Enhancer:
         
         # Sampling
         if sampling_method == 'ddim':
-            # DDIM sampling with skipped timesteps
-            timesteps = torch.linspace(
-                self.config['diffusion']['num_timesteps'] - 1,
-                0,
-                num_steps,
-                dtype=torch.long,
-                device=self.device
-            )
+            # DDIM sampling — use range-based timesteps to avoid linspace rounding errors
+            total_T = self.config['diffusion']['num_timesteps']
+            step_size = total_T // num_steps
+            timesteps = list(range(total_T - 1, -1, -step_size))[:num_steps]
             
             for i, t in enumerate(tqdm(timesteps, desc='DDIM Sampling', leave=False)):
                 t_batch = torch.full((batch_size,), t, device=self.device, dtype=torch.long)
@@ -162,10 +158,10 @@ class Enhancer:
                 noise_pred = self._predict_noise(x, low_light_image, t_batch)
                 
                 # DDIM step
-                prev_t = timesteps[i + 1] if i < len(timesteps) - 1 else torch.tensor(-1, device=self.device)
+                prev_t = timesteps[i + 1] if i < len(timesteps) - 1 else -1
                 x = self.noise_scheduler.ddim_step(
-                    noise_pred, t.item(), x, eta=eta,
-                    prev_timestep=prev_t.item() if prev_t >= 0 else None
+                    noise_pred, t, x, eta=eta,
+                    prev_timestep=prev_t if prev_t >= 0 else None
                 )
         
         else:  # DDPM sampling

@@ -216,8 +216,8 @@ class NoiseScheduler:
             sample - torch.sqrt(1 - alpha_prod_t) * model_output
         ) / torch.sqrt(alpha_prod_t)
         
-        # Clamp predicted x_0 to prevent instability (allows slight overshoot above 1.0)
-        pred_original_sample = torch.clamp(pred_original_sample, -1.0, 2.0)
+        # Clamp predicted x_0 to valid image range [0, 1]
+        pred_original_sample = torch.clamp(pred_original_sample, 0.0, 1.0)
         
         # Compute variance (with numerical stability)
         if eta > 0 and prev_t >= 0:

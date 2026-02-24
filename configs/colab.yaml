@@ -20,13 +20,13 @@ diffusion:
 
 training:
   batch_size: 4  # Reduced from 8 for Colab GPU memory
-  learning_rate: 1e-4
-  weight_decay: 1e-2
+  learning_rate: 0.0001
+  weight_decay: 0.01
   num_epochs: 100  # Reduced from 500 for faster demo training
   warmup_epochs: 5  # Reduced from 10
   grad_clip: 1.0
-  ema_decay: 0.9999
-  perceptual_loss_weight: 0.1
+  ema_decay: 0.999  # FIX: 0.9999 is too slow for 100-epoch Colab runs; use 0.999
+  perceptual_loss_weight: 0.0  # FIX: disable perceptual loss initially; enable after epoch 50 once MSE converges
   save_every: 25  # Save more frequently for shorter training
   val_every: 5   # Validate more frequently
   checkpoint_dir: "/content/drive/MyDrive/DFLLIV/checkpoints"  # Save to Google Drive
