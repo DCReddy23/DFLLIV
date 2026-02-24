@@ -200,7 +200,7 @@ class Enhancer:
             batch_size = x.shape[0]
             image_size = x.shape[2:]
             coords = create_coordinate_grid(image_size[0], image_size[1], device=self.device)
-            noise_pred = self.model(low_light, coords, timesteps)
+            noise_pred = self.model(low_light, coords, timesteps, x)
             noise_pred = noise_pred.reshape(batch_size, image_size[0], image_size[1], 3)
             noise_pred = noise_pred.permute(0, 3, 1, 2)
             return noise_pred

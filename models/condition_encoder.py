@@ -32,7 +32,10 @@ class ConditionEncoder(nn.Module):
         self.condition_dim = condition_dim
         
         # Load ResNet-18 backbone
-        resnet = models.resnet18(pretrained=pretrained)
+        if pretrained:
+            resnet = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
+        else:
+            resnet = models.resnet18(weights=None)
         
         # Remove final FC layer to get features (512-dim for ResNet-18)
         self.backbone = nn.Sequential(*list(resnet.children())[:-1])

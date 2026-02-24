@@ -185,6 +185,7 @@ class UNet(nn.Module):
         
         # Upsample path
         self.up = nn.ModuleList()
+        self.up_has_skip = []  # Track which ResidualBlocks expect a skip connection
         
         for i, mult in reversed(list(enumerate(channel_multipliers))):
             out_ch = channels * mult
@@ -192,8 +193,10 @@ class UNet(nn.Module):
             # Residual blocks (with skip connections)
             for j in range(num_res_blocks + 1):
                 # Account for skip connection from down path
-                in_ch = current_channels + (out_ch if j == 0 and i < len(channel_multipliers) - 1 else 0)
+                has_skip = j == 0 and i < len(channel_multipliers) - 1
+                in_ch = current_channels + (out_ch if has_skip else 0)
                 self.up.append(ResidualBlock(in_ch, out_ch, time_embed_dim, dropout))
+                self.up_has_skip.append(has_skip)
                 current_channels = out_ch
             
             # Upsample (except at the first level being processed, which is the last)
@@ -249,14 +252,14 @@ class UNet(nn.Module):
             h = module(h, time_emb)
         
         # Upsampling - use skip connections
+        skip_idx = 0
         for module in self.up:
             if isinstance(module, ResidualBlock):
-                # Pop skip connection if available and matches size
-                if len(hs) > 0:
+                if self.up_has_skip[skip_idx] and len(hs) > 0:
                     skip = hs.pop()
-                    if skip.shape[2:] == h.shape[2:]:
-                        h = torch.cat([h, skip], dim=1)
+                    h = torch.cat([h, skip], dim=1)
                 h = module(h, time_emb)
+                skip_idx += 1
             else:  # Upsample
                 h = module(h)
         

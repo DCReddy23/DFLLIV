@@ -146,7 +146,7 @@ class Evaluator:
                 noise_pred = self.model(x, t_batch, low_light_image)
             else:
                 coords = create_coordinate_grid(image_size[0], image_size[1], device=self.device)
-                noise_pred = self.model(low_light_image, coords, t_batch)
+                noise_pred = self.model(low_light_image, coords, t_batch, x)
                 noise_pred = noise_pred.reshape(batch_size, image_size[0], image_size[1], 3)
                 noise_pred = noise_pred.permute(0, 3, 1, 2)
             

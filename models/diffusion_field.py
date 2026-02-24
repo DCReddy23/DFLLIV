@@ -99,8 +99,8 @@ class DiffusionFieldMLP(nn.Module):
         self.time_embed = TimestepEmbedding(time_embed_dim)
         
         # Input projection
-        # Combines coord encoding + condition + time embedding
-        input_dim = coord_dim + condition_dim + time_embed_dim
+        # Combines coord encoding + condition + time embedding + noisy pixel values
+        input_dim = coord_dim + condition_dim + time_embed_dim + output_channels
         self.input_layer = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.SiLU()
@@ -127,7 +127,8 @@ class DiffusionFieldMLP(nn.Module):
         self,
         coords_encoded: torch.Tensor,
         condition: torch.Tensor,
-        timesteps: torch.Tensor
+        timesteps: torch.Tensor,
+        noisy_pixels: torch.Tensor
     ) -> torch.Tensor:
         """Predict noise at given coordinates.
         
@@ -135,6 +136,7 @@ class DiffusionFieldMLP(nn.Module):
             coords_encoded: Fourier-encoded coordinates of shape (B, N, coord_dim)
             condition: Conditioning vectors of shape (B, condition_dim)
             timesteps: Timestep indices of shape (B,)
+            noisy_pixels: Noisy pixel RGB values at each coordinate (B, N, output_channels)
         
         Returns:
             Predicted noise of shape (B, N, output_channels)
@@ -149,7 +151,7 @@ class DiffusionFieldMLP(nn.Module):
         time_emb_expanded = time_emb.unsqueeze(1).expand(-1, num_points, -1)  # (B, N, time_embed_dim)
         
         # Concatenate all inputs
-        x = torch.cat([coords_encoded, condition_expanded, time_emb_expanded], dim=-1)  # (B, N, input_dim)
+        x = torch.cat([coords_encoded, condition_expanded, time_emb_expanded, noisy_pixels], dim=-1)  # (B, N, input_dim)
         
         # Store for skip connections
         input_features = x
@@ -217,7 +219,8 @@ class DiffusionFieldModel(nn.Module):
         self,
         low_light_image: torch.Tensor,
         coords: torch.Tensor,
-        timesteps: torch.Tensor
+        timesteps: torch.Tensor,
+        noisy_image: torch.Tensor
     ) -> torch.Tensor:
         """Forward pass through the full diffusion field model.
         
@@ -225,6 +228,7 @@ class DiffusionFieldModel(nn.Module):
             low_light_image: Low-light input image of shape (B, 3, H, W)
             coords: Normalized coordinates of shape (B, N, 2) or (H, W, 2)
             timesteps: Timestep indices of shape (B,)
+            noisy_image: Current noisy image of shape (B, 3, H, W)
         
         Returns:
             Predicted noise at coordinates of shape (B, N, 3) or (B, H*W, 3)
@@ -241,8 +245,17 @@ class DiffusionFieldModel(nn.Module):
         # Encode coordinates
         coords_encoded = self.coord_encoder(coords)  # (B, N, coord_dim)
         
+        # Sample noisy pixel values at coordinate locations using grid_sample
+        # coords are (B, N, 2) in [0, 1] - transform to [-1, 1] for grid_sample
+        grid = coords * 2 - 1  # (B, N, 2) in [-1, 1]
+        grid = grid.unsqueeze(1)  # (B, 1, N, 2)
+        noisy_pixels = torch.nn.functional.grid_sample(
+            noisy_image, grid, mode='bilinear', align_corners=True
+        )  # (B, C, 1, N)
+        noisy_pixels = noisy_pixels.squeeze(2).permute(0, 2, 1)  # (B, N, C)
+        
         # Predict noise
-        noise_pred = self.diffusion_mlp(coords_encoded, condition, timesteps)
+        noise_pred = self.diffusion_mlp(coords_encoded, condition, timesteps, noisy_pixels)
         
         return noise_pred
 
@@ -267,7 +280,8 @@ if __name__ == "__main__":
     
     coords_encoded = torch.randn(4, 100, 514)
     condition = torch.randn(4, 256)
-    noise_pred = mlp(coords_encoded, condition, timesteps)
+    noisy_pixels = torch.randn(4, 100, 3)
+    noise_pred = mlp(coords_encoded, condition, timesteps, noisy_pixels)
     
     print(f"Coords encoded shape: {coords_encoded.shape}")
     print(f"Condition shape: {condition.shape}")
@@ -285,8 +299,9 @@ if __name__ == "__main__":
     low_light_img = torch.randn(2, 3, 256, 256)
     coords = torch.rand(256, 256, 2)
     timesteps = torch.randint(0, 1000, (2,))
+    noisy_img = torch.randn(2, 3, 256, 256)
     
-    noise_pred_full = model(low_light_img, coords, timesteps)
+    noise_pred_full = model(low_light_img, coords, timesteps, noisy_img)
     print(f"Low-light image shape: {low_light_img.shape}")
     print(f"Coords shape: {coords.shape}")
     print(f"Noise prediction shape: {noise_pred_full.shape}")
