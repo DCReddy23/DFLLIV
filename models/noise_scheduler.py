@@ -216,12 +216,21 @@ class NoiseScheduler:
             sample - torch.sqrt(1 - alpha_prod_t) * model_output
         ) / torch.sqrt(alpha_prod_t)
         
-        # Compute variance
-        variance = (1 - alpha_prod_t_prev) / (1 - alpha_prod_t) * (1 - alpha_prod_t / alpha_prod_t_prev)
-        std_dev_t = eta * torch.sqrt(variance)
+        # Clamp predicted x_0 to prevent instability (allows slight overshoot above 1.0)
+        pred_original_sample = torch.clamp(pred_original_sample, -1.0, 2.0)
+        
+        # Compute variance (with numerical stability)
+        if eta > 0 and prev_t >= 0:
+            variance = (1 - alpha_prod_t_prev) / (1 - alpha_prod_t) * (1 - alpha_prod_t / alpha_prod_t_prev)
+            variance = torch.clamp(variance, min=1e-20)
+            std_dev_t = eta * torch.sqrt(variance)
+        else:
+            std_dev_t = torch.tensor(0.0, device=self.device)
         
         # Compute direction pointing to x_t
-        pred_sample_direction = torch.sqrt(1 - alpha_prod_t_prev - std_dev_t ** 2) * model_output
+        pred_sample_direction = torch.sqrt(
+            torch.clamp(1 - alpha_prod_t_prev - std_dev_t ** 2, min=0.0)
+        ) * model_output
         
         # Compute x_{t-1}
         pred_prev_sample = torch.sqrt(alpha_prod_t_prev) * pred_original_sample + pred_sample_direction

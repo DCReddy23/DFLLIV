@@ -12,7 +12,7 @@ diffusion:
   beta_start: 0.0001
   beta_end: 0.02
   sampling_method: "ddim"  # or "ddpm"
-  ddim_steps: 50
+  ddim_steps: 100  # Increased from 50 for better quality during validation
 
 training:
   batch_size: 8
