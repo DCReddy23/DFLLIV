@@ -276,11 +276,15 @@ class Trainer:
         vis_samples = []
         
         for batch_idx, (low_light, normal_light) in enumerate(tqdm(val_loader, desc='Validation')):
-            low_light = low_light.to(self.device)
-            normal_light = normal_light.to(self.device)
+            low_light = low_light.to(self.device).float()
+            normal_light = normal_light.to(self.device).float()
             
-            # Generate enhanced images
+            # Generate enhanced images (sampling must be in float32)
             enhanced = self._sample(low_light)
+            
+            # Ensure both are in the same range [0, 1] before computing metrics
+            enhanced = torch.clamp(enhanced, 0.0, 1.0)
+            normal_light = torch.clamp(normal_light, 0.0, 1.0)
             
             # Update metrics
             self.metric_tracker.update(enhanced, normal_light, compute_lpips=(batch_idx < 5))
@@ -319,33 +323,36 @@ class Trainer:
         # Start from random noise
         x = torch.randn(batch_size, 3, *image_size, device=self.device)
         
-        # DDIM sampling
-        timesteps = torch.linspace(
-            self.config['diffusion']['num_timesteps'] - 1,
-            0,
-            num_steps,
-            dtype=torch.long,
-            device=self.device
-        )
+        # DDIM sampling — use proper integer timestep indices
+        total_timesteps = self.config['diffusion']['num_timesteps']
+        step_size = total_timesteps // num_steps
+        timesteps = list(range(total_timesteps - 1, -1, -step_size))[:num_steps]
         
         for i, t in enumerate(tqdm(timesteps, desc='Sampling', leave=False)):
             t_batch = torch.full((batch_size,), t, device=self.device, dtype=torch.long)
             
-            # Predict noise
-            if self.config['model']['type'] == 'unet':
-                noise_pred = self.model(x, t_batch, low_light)
-            else:
-                from models.coord_encoder import create_coordinate_grid
-                coords = create_coordinate_grid(image_size[0], image_size[1], device=self.device)
-                noise_pred = self.model(low_light, coords, t_batch, x)
-                noise_pred = noise_pred.reshape(batch_size, image_size[0], image_size[1], 3)
-                noise_pred = noise_pred.permute(0, 3, 1, 2)
+            # Disable AMP for sampling to avoid float16 accumulation errors
+            with torch.amp.autocast('cuda', enabled=False):
+                x_float = x.float()
+                low_light_float = low_light.float()
+                
+                # Predict noise
+                if self.config['model']['type'] == 'unet':
+                    noise_pred = self.model(x_float, t_batch, low_light_float)
+                else:
+                    from models.coord_encoder import create_coordinate_grid
+                    coords = create_coordinate_grid(image_size[0], image_size[1], device=self.device)
+                    noise_pred = self.model(low_light_float, coords, t_batch, x_float)
+                    noise_pred = noise_pred.reshape(batch_size, image_size[0], image_size[1], 3)
+                    noise_pred = noise_pred.permute(0, 3, 1, 2)
+                
+                noise_pred = noise_pred.float()
             
-            # DDIM step
-            prev_t = timesteps[i + 1] if i < len(timesteps) - 1 else torch.tensor(-1, device=self.device)
+            # DDIM step with proper integer timesteps
+            prev_t = timesteps[i + 1] if i < len(timesteps) - 1 else -1
             x = self.noise_scheduler.ddim_step(
-                noise_pred, t.item(), x, eta=0.0,
-                prev_timestep=prev_t.item() if prev_t >= 0 else None
+                noise_pred, t, x, eta=0.0,
+                prev_timestep=prev_t if prev_t >= 0 else None
             )
         
         # Clamp to [0, 1]
